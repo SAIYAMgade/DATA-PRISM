@@ -1,0 +1,12 @@
+{
+  "name": "dataprism-workspace",
+  "version": "1.0.0",
+  "description": "DATAPRISM: Analytics Workspace",
+  "scripts": {
+    "start": "python run.py",
+    "dev:backend": ".venv/Scripts/uvicorn apps.api.app.main:app --reload --port 8000",
+    "dev:frontend": "npm run dev --prefix apps/web",
+    "build:frontend": "npm run build --prefix apps/web",
+    "test:backend": ".venv/Scripts/pytest apps/api/tests"
+  }
+}
