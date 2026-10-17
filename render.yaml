@@ -3,7 +3,7 @@ services:
     name: dataprism-workspace
     runtime: python
     plan: free
-    buildCommand: "pip install -r requirements.txt && npm install --prefix apps/web && npm run build --prefix apps/web"
+    buildCommand: "pip install -r requirements.txt"
     startCommand: "uvicorn apps.api.app.main:app --host 0.0.0.0 --port $PORT"
     healthCheckPath: /health
     envVars:
