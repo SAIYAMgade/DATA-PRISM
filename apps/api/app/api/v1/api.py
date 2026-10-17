@@ -1,11 +1,13 @@
 import shutil
+import time
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query
 from sqlalchemy.orm import Session
 from apps.api.app.db.session import get_db
-from apps.api.app.core.config import settings
+from apps.api.app.core.config import settings, SERVER_START_TIME
 from apps.api.app.models.entities import (
     Workspace, Dataset, SavedQuery, QueryHistory, Metric, Dashboard, Widget, Insight, Report
 )
@@ -29,6 +31,8 @@ def health_check():
     return {
         "status": "healthy",
         "service": settings.APP_NAME,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "uptime": round(time.time() - SERVER_START_TIME, 2),
         "environment": settings.APP_ENV,
         "query_engine": "DuckDB in-process",
         "metadata_store": "ready"

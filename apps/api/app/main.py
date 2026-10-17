@@ -1,10 +1,12 @@
 import os
+import time
+from datetime import datetime, timezone
 from contextlib import asynccontextmanager
 from pathlib import Path
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from apps.api.app.core.config import settings
+from apps.api.app.core.config import settings, SERVER_START_TIME
 from apps.api.app.db.session import engine, SessionLocal, Base
 from apps.api.app.models.entities import Workspace, Dataset, Metric, SavedQuery, Dashboard, Widget, Report
 from apps.api.app.api.v1.api import router as api_v1_router
@@ -184,6 +186,18 @@ app.add_middleware(
 )
 
 app.include_router(api_v1_router, prefix="/api/v1")
+
+@app.get("/health")
+def root_health():
+    return {
+        "status": "healthy",
+        "service": settings.APP_NAME,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "uptime": round(time.time() - SERVER_START_TIME, 2),
+        "environment": settings.APP_ENV,
+        "query_engine": "DuckDB in-process",
+        "metadata_store": "ready"
+    }
 
 # Mount frontend if built
 dist_dir = Path(__file__).resolve().parent.parent.parent / "web" / "dist"

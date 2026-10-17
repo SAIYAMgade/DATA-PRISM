@@ -1,6 +1,9 @@
 import os
+import time
 from pathlib import Path
 from pydantic import BaseModel
+
+SERVER_START_TIME: float = time.time()
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent.parent.parent
 DATA_DIR = BASE_DIR / "data"

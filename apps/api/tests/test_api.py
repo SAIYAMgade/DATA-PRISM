@@ -13,6 +13,18 @@ def test_health(client):
     data = res.json()
     assert data["status"] == "healthy"
     assert data["service"] == "DATAPRISM"
+    assert "timestamp" in data
+    assert "uptime" in data
+
+def test_root_health(client):
+    res = client.get("/health")
+    assert res.status_code == 200
+    data = res.json()
+    assert data["status"] == "healthy"
+    assert data["service"] == "DATAPRISM"
+    assert "timestamp" in data
+    assert "uptime" in data
+    assert data["uptime"] >= 0
 
 def test_workspaces_and_datasets(client):
     res = client.get("/api/v1/workspaces")
