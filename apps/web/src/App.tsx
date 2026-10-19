@@ -16,6 +16,10 @@ import {
   AlertCircle,
   ArrowRight,
   RefreshCw,
+  Bot,
+  CheckCircle2,
+  Copy,
+  Check,
 } from "lucide-react";
 import ReactECharts from "echarts-for-react";
 import { api } from "./api/client";
@@ -29,6 +33,9 @@ import type {
   Report,
   SavedQuery,
   QueryHistoryItem,
+  AIProfileSummary,
+  NLToSqlResult,
+  IngestionRun,
 } from "./api/client";
 
 type Tab =
@@ -36,6 +43,7 @@ type Tab =
   | "datasets"
   | "quality"
   | "sql"
+  | "ai"
   | "models"
   | "metrics"
   | "dashboards"
@@ -52,6 +60,7 @@ export default function App() {
   const [selectedDataset, setSelectedDataset] = useState<Dataset | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [ingestionRuns, setIngestionRuns] = useState<IngestionRun[]>([]);
 
   // SQL Workbench
   const [sqlQuery, setSqlQuery] = useState<string>("SELECT * FROM ds_uci_online_retail_ii_4af242ed LIMIT 10");
@@ -70,6 +79,53 @@ export default function App() {
   const [reports, setReports] = useState<Report[]>([]);
   const [selectedReport, setSelectedReport] = useState<Report | null>(null);
   const [lineage, setLineage] = useState<any>(null);
+
+  // AI Copilot & NL-to-SQL
+  const [nlQuestion, setNlQuestion] = useState("");
+  const [isNlLoading, setIsNlLoading] = useState(false);
+  const [nlResult, setNlResult] = useState<NLToSqlResult | null>(null);
+  const [aiProfile, setAiProfile] = useState<AIProfileSummary | null>(null);
+  const [isAiProfileLoading, setIsAiProfileLoading] = useState(false);
+  const [copiedSql, setCopiedSql] = useState(false);
+
+  const handleAskAI = async (customPrompt?: string) => {
+    if (!currentWorkspace) return;
+    const promptToUse = customPrompt || nlQuestion;
+    if (!promptToUse) return;
+    setIsNlLoading(true);
+    try {
+      const res = await api.nlToSql(currentWorkspace.id, promptToUse, selectedDataset?.id);
+      setNlResult(res);
+      if (res.generated_sql) {
+        setSqlQuery(res.generated_sql);
+        if (res.query_result) {
+          setQueryResult(res.query_result);
+        }
+      }
+    } catch (err) {
+      console.error("NL-to-SQL error", err);
+    } finally {
+      setIsNlLoading(false);
+    }
+  };
+
+  const handleFetchAiProfile = async (datasetId: string) => {
+    setIsAiProfileLoading(true);
+    try {
+      const res = await api.getAIProfileSummary(datasetId);
+      setAiProfile(res);
+    } catch (err) {
+      console.error("AI profile error", err);
+    } finally {
+      setIsAiProfileLoading(false);
+    }
+  };
+
+  const handleCopySql = (sql: string) => {
+    navigator.clipboard.writeText(sql);
+    setCopiedSql(true);
+    setTimeout(() => setCopiedSql(false), 2000);
+  };
 
   useEffect(() => {
     loadInitialData();
@@ -107,6 +163,8 @@ export default function App() {
         setSelectedDataset(dsList[0]);
         // Update default query with real table name
         setSqlQuery(`SELECT Country, COUNT(*) AS transactions, ROUND(SUM(Quantity * Price), 2) AS revenue FROM ${dsList[0].table_name} WHERE Quantity > 0 GROUP BY Country ORDER BY revenue DESC LIMIT 10;`);
+        api.getIngestionRuns(dsList[0].id).then(setIngestionRuns).catch(console.error);
+        api.getAIProfileSummary(dsList[0].id).then(setAiProfile).catch(console.error);
       }
       setMetrics(mList);
       setDashboards(dList);
@@ -237,6 +295,7 @@ export default function App() {
             { id: "datasets", label: "Datasets & Profiling", icon: Database },
             { id: "quality", label: "Data Quality", icon: ShieldCheck },
             { id: "sql", label: "SQL Workbench", icon: Terminal },
+            { id: "ai", label: "AI Analyst", icon: Bot },
             { id: "models", label: "Analytical Models", icon: GitBranch },
             { id: "metrics", label: "Metric Catalog", icon: Bookmark },
             { id: "dashboards", label: "Dashboards", icon: BarChart3 },
@@ -491,6 +550,64 @@ export default function App() {
                     </button>
                   </div>
 
+                  {/* Ingestion & Provenance Telemetry */}
+                  <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                    <div className="flex items-center justify-between mb-3 border-b border-slate-100 pb-2">
+                      <div className="flex items-center gap-2">
+                        <ShieldCheck className="h-4 w-4 text-emerald-600" />
+                        <h4 className="text-xs font-bold text-slate-900 uppercase tracking-wider">
+                          Source-to-Target Reconciliation & Ingestion Telemetry
+                        </h4>
+                      </div>
+                      {selectedDataset.file_checksum && (
+                        <div className="font-mono text-[10px] text-slate-500">
+                          SHA-256: <span className="bg-slate-100 px-1.5 py-0.5 rounded text-slate-700">{selectedDataset.file_checksum.slice(0, 16)}...</span>
+                        </div>
+                      )}
+                    </div>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                      <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-100">
+                        <div className="text-[11px] text-slate-500">Source Rows Read</div>
+                        <div className="text-sm font-bold text-slate-800 mt-0.5">
+                          {(selectedDataset.rows_read || selectedDataset.row_count).toLocaleString()}
+                        </div>
+                      </div>
+                      <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-100">
+                        <div className="text-[11px] text-slate-500">Rows Inserted</div>
+                        <div className="text-sm font-bold text-emerald-700 mt-0.5">
+                          {(selectedDataset.rows_inserted || selectedDataset.row_count).toLocaleString()}
+                        </div>
+                      </div>
+                      <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-100">
+                        <div className="text-[11px] text-slate-500">Rows Rejected</div>
+                        <div className="text-sm font-bold text-slate-800 mt-0.5">
+                          {(selectedDataset.rows_rejected || 0).toLocaleString()}
+                        </div>
+                      </div>
+                      <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-100">
+                        <div className="text-[11px] text-slate-500">Processing Time</div>
+                        <div className="text-sm font-bold text-slate-800 mt-0.5">
+                          {selectedDataset.processing_duration_ms ? `${selectedDataset.processing_duration_ms.toFixed(1)} ms` : "Fast Ingest"}
+                        </div>
+                      </div>
+                    </div>
+                    {ingestionRuns.length > 0 && (
+                      <div className="mt-3 pt-2 border-t border-slate-100">
+                        <div className="text-[11px] font-semibold text-slate-600 mb-1.5">Recent Ingestion History</div>
+                        <div className="space-y-1">
+                          {ingestionRuns.slice(0, 3).map((run) => (
+                            <div key={run.id} className="flex items-center justify-between text-[11px] bg-slate-50/80 px-2.5 py-1 rounded">
+                              <span className="font-mono text-slate-600">Run {run.id.slice(0, 8)}</span>
+                              <span className="text-emerald-700 font-medium uppercase">{run.status}</span>
+                              <span className="text-slate-500">{run.rows_inserted.toLocaleString()} rows</span>
+                              <span className="text-slate-400">{new Date(run.created_at).toLocaleTimeString()}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
                   {/* Columns table */}
                   <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
                     <div className="border-b border-slate-200 px-5 py-3 bg-slate-50 font-semibold text-xs text-slate-700">
@@ -546,12 +663,102 @@ export default function App() {
           {/* 3. DATA QUALITY */}
           {activeTab === "quality" && (
             <div className="space-y-6 max-w-7xl mx-auto">
-              <div>
-                <h1 className="text-xl font-bold text-slate-900">Data Quality & Issue Explorer</h1>
-                <p className="text-sm text-slate-500">
-                  Transparent scoring model and verified business constraint checks.
-                </p>
+              <div className="flex items-center justify-between">
+                <div>
+                  <h1 className="text-xl font-bold text-slate-900">Data Quality & Issue Explorer</h1>
+                  <p className="text-sm text-slate-500">
+                    Transparent scoring model, deterministic rule verification, and AI-assisted health profiling.
+                  </p>
+                </div>
+                {selectedDataset && (
+                  <button
+                    onClick={() => handleFetchAiProfile(selectedDataset.id)}
+                    disabled={isAiProfileLoading}
+                    className="flex items-center gap-1.5 rounded-md bg-indigo-600 px-3.5 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-indigo-700 disabled:opacity-50"
+                  >
+                    <Bot className="h-4 w-4" />
+                    {isAiProfileLoading ? "Analyzing Quality..." : "Run AI Quality Audit"}
+                  </button>
+                )}
               </div>
+
+              {/* AI Quality Audit Card */}
+              {aiProfile && (
+                <div className="rounded-xl border border-indigo-200 bg-gradient-to-br from-indigo-50/70 via-white to-slate-50 p-5 shadow-sm space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-600 text-white font-extrabold text-base shadow-sm">
+                        {aiProfile.health_grade}
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <h3 className="font-bold text-sm text-slate-900">AI Health Assessment</h3>
+                          <span className="rounded bg-indigo-100 text-indigo-800 text-[10px] font-semibold px-2 py-0.5">
+                            Grade {aiProfile.health_grade}
+                          </span>
+                        </div>
+                        <p className="text-xs text-slate-500">{aiProfile.dataset_name}</p>
+                      </div>
+                    </div>
+                    <span className="text-[11px] font-medium text-slate-400">
+                      Evaluated on {selectedDataset?.column_count || 0} columns &amp; {selectedDataset?.row_count.toLocaleString() || 0} rows
+                    </span>
+                  </div>
+
+                  <p className="text-xs text-slate-700 leading-relaxed bg-white/80 p-3 rounded-lg border border-slate-200/80">
+                    {aiProfile.executive_summary}
+                  </p>
+
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-1">
+                    <div className="rounded-lg bg-white p-3.5 border border-slate-200 shadow-xs">
+                      <h4 className="text-xs font-bold text-slate-900 mb-2 flex items-center gap-1.5">
+                        <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" /> Key Observations
+                      </h4>
+                      <ul className="space-y-1.5 text-xs text-slate-600">
+                        {aiProfile.key_observations.map((obs, i) => (
+                          <li key={i} className="flex items-start gap-1.5">
+                            <span className="text-indigo-500 font-bold">•</span>
+                            <span>{obs}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+
+                    <div className="rounded-lg bg-white p-3.5 border border-slate-200 shadow-xs">
+                      <h4 className="text-xs font-bold text-slate-900 mb-2 flex items-center gap-1.5">
+                        <AlertTriangle className="h-3.5 w-3.5 text-amber-600" /> Identified Risk Factors
+                      </h4>
+                      <ul className="space-y-1.5 text-xs text-slate-600">
+                        {aiProfile.risk_factors.map((risk, i) => (
+                          <li key={i} className="flex items-start gap-1.5">
+                            <span className="text-amber-500 font-bold">•</span>
+                            <span>{risk}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+
+                    <div className="rounded-lg bg-white p-3.5 border border-slate-200 shadow-xs">
+                      <h4 className="text-xs font-bold text-slate-900 mb-2 flex items-center gap-1.5">
+                        <ArrowRight className="h-3.5 w-3.5 text-indigo-600" /> Recommended Actions
+                      </h4>
+                      <ul className="space-y-1.5 text-xs text-slate-600">
+                        {aiProfile.recommended_transformations.map((action, i) => (
+                          <li key={i} className="flex items-start gap-1.5">
+                            <span className="text-indigo-500 font-bold">•</span>
+                            <span>{action}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  </div>
+
+                  <div className="text-[11px] text-slate-400 border-t border-slate-200/60 pt-2 flex items-center justify-between">
+                    <span>{aiProfile.ai_disclaimer}</span>
+                    <span className="font-mono text-[10px] text-indigo-600 font-medium">Deterministic Rule Engine · Explainable Metrics</span>
+                  </div>
+                </div>
+              )}
 
               {/* Quality Score Breakdown Card */}
               <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
@@ -649,6 +856,93 @@ export default function App() {
                     {isQueryRunning ? "Executing..." : "Run Query (Ctrl+Enter)"}
                   </button>
                 </div>
+              </div>
+
+              {/* AI Natural Language Query Copilot Bar */}
+              <div className="rounded-xl border border-indigo-200 bg-gradient-to-r from-indigo-50/70 via-white to-indigo-50/40 p-3.5 shadow-sm space-y-2.5">
+                <div className="flex flex-col sm:flex-row gap-2">
+                  <div className="relative flex-1">
+                    <input
+                      type="text"
+                      placeholder="Ask in natural language (e.g. 'What are the top 5 countries by revenue?' or 'Return rate by country')..."
+                      value={nlQuestion}
+                      onChange={(e) => setNlQuestion(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          handleAskAI();
+                        }
+                      }}
+                      className="w-full rounded-lg border border-indigo-200 bg-white py-2 pl-9 pr-3 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 shadow-xs"
+                    />
+                    <Bot className="absolute left-3 top-2.5 h-4 w-4 text-indigo-500" />
+                  </div>
+                  <button
+                    onClick={() => handleAskAI()}
+                    disabled={isNlLoading || !nlQuestion.trim()}
+                    className="flex items-center justify-center gap-1.5 rounded-lg bg-indigo-600 px-4 py-2 text-xs font-semibold text-white shadow-sm hover:bg-indigo-700 disabled:opacity-50 transition-colors"
+                  >
+                    <Sparkles className="h-3.5 w-3.5" />
+                    {isNlLoading ? "Synthesizing SQL..." : "Ask AI & Execute"}
+                  </button>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-slate-500">
+                  <span className="font-semibold text-slate-600">Quick Prompts:</span>
+                  {[
+                    "Top 5 countries by revenue",
+                    "Top 10 products by quantity",
+                    "Return rate by country",
+                    "Monthly sales trends",
+                  ].map((chip) => (
+                    <button
+                      key={chip}
+                      onClick={() => {
+                        setNlQuestion(chip);
+                        handleAskAI(chip);
+                      }}
+                      className="rounded-full border border-indigo-100 bg-white px-2.5 py-0.5 text-[10px] font-medium text-indigo-700 hover:bg-indigo-50 hover:border-indigo-300 transition-colors"
+                    >
+                      {chip}
+                    </button>
+                  ))}
+                </div>
+
+                {nlResult && (
+                  <div className="rounded-lg bg-white border border-indigo-100 p-3 mt-1 space-y-1.5 text-xs">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span className="rounded bg-indigo-100 text-indigo-800 text-[10px] font-bold px-1.5 py-0.5 uppercase tracking-wide">
+                          AI Query Synthesized
+                        </span>
+                        <span className="rounded bg-slate-100 text-slate-700 text-[10px] font-medium px-1.5 py-0.5">
+                          Visual: {nlResult.suggested_visualization.toUpperCase()}
+                        </span>
+                      </div>
+                      <button
+                        onClick={() => handleCopySql(nlResult.generated_sql)}
+                        className="flex items-center gap-1 text-[11px] text-slate-600 hover:text-indigo-600 font-medium"
+                      >
+                        {copiedSql ? (
+                          <>
+                            <Check className="h-3 w-3 text-emerald-600" /> Copied!
+                          </>
+                        ) : (
+                          <>
+                            <Copy className="h-3 w-3" /> Copy SQL
+                          </>
+                        )}
+                      </button>
+                    </div>
+                    <p className="text-slate-700 leading-relaxed font-medium">
+                      {nlResult.explanation}
+                    </p>
+                    {nlResult.data_limitations && (
+                      <p className="text-[10px] text-slate-400 italic">
+                        Note: {nlResult.data_limitations}
+                      </p>
+                    )}
+                  </div>
+                )}
               </div>
 
               {/* Editor & Sidebar Layout */}
@@ -820,6 +1114,239 @@ export default function App() {
                       </button>
                     </div>
                   </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* AI ANALYST COPILOT */}
+          {activeTab === "ai" && (
+            <div className="space-y-6 max-w-7xl mx-auto">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h1 className="text-xl font-bold text-slate-900 flex items-center gap-2">
+                    <Bot className="h-6 w-6 text-indigo-600" /> AI Analytics Copilot
+                  </h1>
+                  <p className="text-sm text-slate-500">
+                    Natural-language-to-SQL synthesis, automated chart selection, and explainable data analytics.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-700 flex items-center gap-1">
+                    <ShieldCheck className="h-3.5 w-3.5" /> Read-only Sandbox Guarded
+                  </span>
+                </div>
+              </div>
+
+              {/* Natural language query input card */}
+              <div className="rounded-xl border border-indigo-200 bg-white p-5 shadow-sm space-y-4">
+                <div className="flex flex-col sm:flex-row gap-3">
+                  <div className="relative flex-1">
+                    <input
+                      type="text"
+                      placeholder="Ask a question about your business data (e.g. 'Show me the top 5 countries by revenue' or 'Find top selling products')..."
+                      value={nlQuestion}
+                      onChange={(e) => setNlQuestion(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          handleAskAI();
+                        }
+                      }}
+                      className="w-full rounded-lg border border-slate-300 bg-slate-50/50 py-2.5 pl-10 pr-4 text-xs text-slate-900 placeholder-slate-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 shadow-xs"
+                    />
+                    <Sparkles className="absolute left-3.5 top-3 h-4 w-4 text-indigo-600" />
+                  </div>
+                  <button
+                    onClick={() => handleAskAI()}
+                    disabled={isNlLoading || !nlQuestion.trim()}
+                    className="flex items-center justify-center gap-2 rounded-lg bg-indigo-600 px-5 py-2.5 text-xs font-semibold text-white shadow-sm hover:bg-indigo-700 disabled:opacity-50 transition-colors"
+                  >
+                    <Bot className="h-4 w-4" />
+                    {isNlLoading ? "Synthesizing Analysis..." : "Ask Copilot"}
+                  </button>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500 pt-1">
+                  <span className="font-semibold text-slate-700">Recommended questions:</span>
+                  {[
+                    "Top 5 countries by revenue",
+                    "Top 10 products by sales volume",
+                    "What is the return rate by country?",
+                    "Monthly sales and order trends",
+                  ].map((chip) => (
+                    <button
+                      key={chip}
+                      onClick={() => {
+                        setNlQuestion(chip);
+                        handleAskAI(chip);
+                      }}
+                      className="rounded-full border border-indigo-100 bg-indigo-50/60 px-3 py-1 text-xs font-medium text-indigo-700 hover:bg-indigo-100 transition-colors"
+                    >
+                      {chip}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Analysis Result Container */}
+              {nlResult && (
+                <div className="space-y-6">
+                  {/* Executive Findings & Visual Preview Grid */}
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    {/* Left: Narrative Insight Card */}
+                    <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm space-y-4 flex flex-col justify-between">
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+                          <span className="text-xs font-bold uppercase tracking-wider text-slate-500">
+                            Analytical Narrative
+                          </span>
+                          <span className="rounded bg-indigo-50 text-indigo-700 text-[10px] font-semibold px-2 py-0.5">
+                            Visual: {nlResult.suggested_visualization.toUpperCase()}
+                          </span>
+                        </div>
+                        <h3 className="font-bold text-sm text-slate-900">
+                          {nlResult.question}
+                        </h3>
+                        <p className="text-xs text-slate-700 leading-relaxed font-medium bg-slate-50 p-3.5 rounded-lg border border-slate-100">
+                          {nlResult.explanation}
+                        </p>
+                      </div>
+
+                      <div className="space-y-3 pt-3 border-t border-slate-100">
+                        {nlResult.data_limitations && (
+                          <div className="text-[11px] text-slate-500 bg-amber-50/60 border border-amber-100 p-2.5 rounded-lg flex items-start gap-2">
+                            <AlertCircle className="h-4 w-4 text-amber-600 flex-shrink-0 mt-0.5" />
+                            <span><strong>Guardrail:</strong> {nlResult.data_limitations}</span>
+                          </div>
+                        )}
+                        <div className="flex items-center justify-between text-[11px] text-slate-400">
+                          <span>Deterministic DuckDB Sandbox Execution</span>
+                          <span className="text-emerald-600 font-semibold flex items-center gap-1">
+                            <CheckCircle2 className="h-3 w-3" /> Zero Metric Fabrication
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Right: Dynamic Visualization preview */}
+                    <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm space-y-3">
+                      <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+                        <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500">
+                          Visual Signal Preview
+                        </h4>
+                        <span className="text-[11px] text-slate-400">
+                          {nlResult.query_result?.row_count || 0} data points
+                        </span>
+                      </div>
+
+                      {nlResult.query_result && nlResult.query_result.rows.length > 0 ? (
+                        <ReactECharts
+                          option={{
+                            tooltip: { trigger: "axis" },
+                            grid: { left: "3%", right: "4%", bottom: "10%", containLabel: true },
+                            xAxis: {
+                              type: "category",
+                              data: nlResult.query_result.rows.slice(0, 10).map((r) => String(r[0])),
+                              axisLabel: { interval: 0, rotate: 25, fontSize: 10 },
+                            },
+                            yAxis: { type: "value" },
+                            series: [
+                              {
+                                data: nlResult.query_result.rows.slice(0, 10).map((r) =>
+                                  typeof r[1] === "number" ? r[1] : parseFloat(r[1]) || 0
+                                ),
+                                type: nlResult.suggested_visualization === "line" ? "line" : "bar",
+                                smooth: true,
+                                color: "#4f46e5",
+                                areaStyle: nlResult.suggested_visualization === "line" ? { opacity: 0.15 } : undefined,
+                              },
+                            ],
+                          }}
+                          style={{ height: "260px" }}
+                        />
+                      ) : (
+                        <div className="h-64 flex items-center justify-center text-xs text-slate-400">
+                          No visual data available for this query.
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Generated SQL Code Block */}
+                  <div className="rounded-xl border border-slate-200 bg-slate-900 text-slate-100 shadow-sm overflow-hidden">
+                    <div className="bg-slate-950 px-4 py-2.5 border-b border-slate-800 flex items-center justify-between text-xs">
+                      <div className="flex items-center gap-2">
+                        <Terminal className="h-3.5 w-3.5 text-indigo-400" />
+                        <span className="font-semibold text-slate-200">Generated &amp; Validated DuckDB SQL</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => handleCopySql(nlResult.generated_sql)}
+                          className="flex items-center gap-1 rounded bg-slate-800 hover:bg-slate-700 px-2.5 py-1 text-[11px] font-medium text-slate-300 transition-colors"
+                        >
+                          {copiedSql ? (
+                            <>
+                              <Check className="h-3 w-3 text-emerald-400" /> Copied
+                            </>
+                          ) : (
+                            <>
+                              <Copy className="h-3 w-3" /> Copy
+                            </>
+                          )}
+                        </button>
+                        <button
+                          onClick={() => {
+                            setSqlQuery(nlResult.generated_sql);
+                            setActiveTab("sql");
+                          }}
+                          className="flex items-center gap-1 rounded bg-indigo-600 hover:bg-indigo-500 px-2.5 py-1 text-[11px] font-semibold text-white transition-colors"
+                        >
+                          <Terminal className="h-3 w-3" /> Open in Workbench
+                        </button>
+                      </div>
+                    </div>
+                    <pre className="p-4 font-mono text-xs text-indigo-200 overflow-x-auto whitespace-pre-wrap leading-relaxed">
+                      {nlResult.generated_sql}
+                    </pre>
+                  </div>
+
+                  {/* Evidence Table */}
+                  {nlResult.query_result && (
+                    <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+                      <div className="border-b border-slate-200 bg-slate-50 px-4 py-3 flex items-center justify-between text-xs">
+                        <span className="font-semibold text-slate-800">
+                          Underlying Query Result ({nlResult.query_result.row_count} rows)
+                        </span>
+                        <span className="text-slate-500 font-mono text-[11px]">
+                          Execution: {nlResult.query_result.duration_ms} ms
+                        </span>
+                      </div>
+                      <div className="overflow-x-auto max-h-72">
+                        <table className="w-full text-left text-xs">
+                          <thead className="bg-slate-100 border-b border-slate-200 text-slate-600 uppercase text-[10px] sticky top-0">
+                            <tr>
+                              {nlResult.query_result.columns.map((col, idx) => (
+                                <th key={idx} className="px-4 py-2.5 font-semibold">
+                                  {col}
+                                </th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100">
+                            {nlResult.query_result.rows.map((row, ri) => (
+                              <tr key={ri} className="hover:bg-slate-50">
+                                {row.map((val, ci) => (
+                                  <td key={ci} className="px-4 py-2 text-slate-700 font-mono text-[11px]">
+                                    {val !== null ? String(val) : <span className="text-slate-400 italic">null</span>}
+                                  </td>
+                                ))}
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
             </div>

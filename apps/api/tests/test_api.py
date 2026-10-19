@@ -114,3 +114,88 @@ def test_decision_reports(client):
     reports = res.json()
     assert len(reports) > 0
     assert "Q4 Commercial Health" in reports[0]["title"]
+
+def test_ai_capabilities(client):
+    res = client.get("/api/v1/ai/capabilities")
+    assert res.status_code == 200
+    data = res.json()
+    assert data["status"] == "ready"
+    assert data["sandbox_enforced"] is True
+    assert "natural_language_to_sql" in data["features"]
+    assert "ai_profile_summary" in data["features"]
+
+def test_ai_profile_summary(client):
+    # Fetch default dataset
+    ds_res = client.get("/api/v1/datasets")
+    assert ds_res.status_code == 200
+    datasets = ds_res.json()
+    assert len(datasets) > 0
+    ds_id = datasets[0]["id"]
+
+    res = client.post("/api/v1/ai/profile-summary", json={"dataset_id": ds_id})
+    assert res.status_code == 200
+    data = res.json()
+    assert data["dataset_id"] == ds_id
+    assert "Health" in data["health_grade"] or "Grade" in data["health_grade"]
+    assert len(data["key_observations"]) > 0
+    assert len(data["recommended_transformations"]) > 0
+    assert data["quality_score"] == datasets[0]["quality_score"]
+    assert "deterministic_metrics" in data
+
+def test_nl_to_sql_valid_query(client):
+    ws_res = client.get("/api/v1/workspaces")
+    assert ws_res.status_code == 200
+    ws_id = ws_res.json()[0]["id"]
+
+    ds_res = client.get(f"/api/v1/datasets?workspace_id={ws_id}")
+    assert ds_res.status_code == 200
+    ds_id = ds_res.json()[0]["id"]
+
+    payload = {
+        "workspace_id": ws_id,
+        "dataset_id": ds_id,
+        "question": "What are the top 5 countries by revenue?",
+        "execute": True
+    }
+    res = client.post("/api/v1/ai/nl-to-sql", json=payload)
+    assert res.status_code == 200
+    data = res.json()
+    assert data["validation_status"] == "valid"
+    assert "SELECT" in data["generated_sql"].upper()
+    assert "revenue" in data["generated_sql"].lower()
+    assert "LIMIT 5" in data["generated_sql"].upper()
+    assert data["suggested_visualization"] == "bar"
+    assert data["query_result"] is not None
+    assert data["query_result"]["status"] == "success"
+    assert data["query_result"]["row_count"] == 5
+
+def test_nl_to_sql_product_ranking(client):
+    ws_res = client.get("/api/v1/workspaces")
+    ws_id = ws_res.json()[0]["id"]
+
+    payload = {
+        "workspace_id": ws_id,
+        "question": "Show top 3 products by sales",
+        "execute": True
+    }
+    res = client.post("/api/v1/ai/nl-to-sql", json=payload)
+    assert res.status_code == 200
+    data = res.json()
+    assert data["validation_status"] == "valid"
+    assert "product" in data["generated_sql"].lower() or "description" in data["generated_sql"].lower()
+    assert data["query_result"]["row_count"] == 3
+
+def test_dataset_ingestion_runs(client):
+    ds_res = client.get("/api/v1/datasets")
+    assert ds_res.status_code == 200
+    datasets = ds_res.json()
+    assert len(datasets) > 0
+    ds_id = datasets[0]["id"]
+
+    runs_res = client.get(f"/api/v1/datasets/{ds_id}/ingestion-runs")
+    assert runs_res.status_code == 200
+    runs = runs_res.json()
+    # Runs should be a valid list
+    assert isinstance(runs, list)
+
+

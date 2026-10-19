@@ -33,3 +33,6 @@ graph TD
    - Explicit service and repository layers separating HTTP routing from analytical logic.
    - DuckDB for isolated, fast, sandboxed read-only analytical SQL over Parquet/CSV.
    - SQLAlchemy with SQLite/PostgreSQL for persistent application state (datasets, saved queries, metrics, dashboards, insights, reports).
+3. **AI Copilot & Ingestion Provenance:**
+   - Dedicated `AIService` supporting deterministic profile interpretations and sandbox-guarded NL-to-SQL.
+   - SHA-256 dataset checksums and `IngestionRun` tracking for complete source-to-target provenance.

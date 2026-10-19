@@ -1,16 +1,28 @@
 import uuid
 import re
+import time
+import hashlib
+import json
 from pathlib import Path
 from typing import Optional
+from datetime import datetime, timezone
 import pandas as pd
 from sqlalchemy.orm import Session
 from apps.api.app.core.config import settings
-from apps.api.app.models.entities import Dataset, DatasetColumn, QualityIssue, Insight
+from apps.api.app.models.entities import Dataset, DatasetColumn, QualityIssue, Insight, IngestionRun
 from apps.api.app.services.profile_service import profile_service
 from apps.api.app.services.query_service import query_service
 from apps.api.app.services.insight_service import insight_service
 
 class IngestService:
+    @staticmethod
+    def calculate_checksum(file_path: Path) -> str:
+        sha256 = hashlib.sha256()
+        with open(file_path, "rb") as f:
+            while chunk := f.read(65536):
+                sha256.update(chunk)
+        return sha256.hexdigest()
+
     @staticmethod
     def ingest_file(
         db: Session,
@@ -18,8 +30,16 @@ class IngestService:
         name: str,
         file_path: Path,
         file_format: str,
-        description: Optional[str] = None
+        description: Optional[str] = None,
+        source_id: Optional[str] = None
     ) -> Dataset:
+        t0 = time.perf_counter()
+        start_time = datetime.now(timezone.utc)
+        
+        # 0. Checksum and Source ID
+        file_checksum = IngestService.calculate_checksum(file_path)
+        actual_source_id = source_id or f"src_{str(uuid.uuid4())[:8]}"
+
         # 1. Read file with pandas
         if file_format == "parquet":
             df = pd.read_parquet(file_path)
@@ -27,6 +47,9 @@ class IngestService:
             df = pd.read_csv(file_path)
         else:
             raise ValueError(f"Unsupported format: {file_format}. Only CSV and Parquet are supported.")
+
+        rows_read = len(df)
+        rows_rejected = 0
 
         # 2. Normalize column names (strip whitespace, sanitize)
         df.columns = [re.sub(r"[^\w]", "_", c.strip()) for c in df.columns]
@@ -40,6 +63,10 @@ class IngestService:
 
         # 5. Run real statistical profiling and quality checks
         col_profiles, quality_issues, quality_score = profile_service.profile_dataframe(df)
+        
+        duration_ms = round((time.perf_counter() - t0) * 1000, 2)
+        completion_time = datetime.now(timezone.utc)
+        detected_schema = json.dumps({c["name"]: c["data_type"] for c in col_profiles})
 
         # 6. Save Dataset entity
         dataset = Dataset(
@@ -48,14 +75,40 @@ class IngestService:
             description=description,
             file_path=str(file_path),
             format=file_format,
-            row_count=len(df),
+            row_count=rows_read,
             column_count=len(df.columns),
             status="ready",
             quality_score=quality_score,
-            table_name=table_name
+            table_name=table_name,
+            file_checksum=file_checksum,
+            rows_read=rows_read,
+            rows_inserted=rows_read,
+            rows_rejected=rows_rejected,
+            processing_duration_ms=duration_ms,
+            source_id=actual_source_id
         )
         db.add(dataset)
         db.flush()
+
+        # 6b. Add IngestionRun record
+        ingestion_run = IngestionRun(
+            dataset_id=dataset.id,
+            source_id=actual_source_id,
+            source_name=name,
+            original_filename=file_path.name,
+            file_checksum=file_checksum,
+            start_time=start_time,
+            completion_time=completion_time,
+            status="completed",
+            rows_read=rows_read,
+            rows_inserted=rows_read,
+            rows_updated=0,
+            rows_rejected=rows_rejected,
+            error_details=None,
+            detected_schema=detected_schema,
+            processing_duration_ms=duration_ms
+        )
+        db.add(ingestion_run)
 
         # 7. Add Column profiles
         for cp in col_profiles:

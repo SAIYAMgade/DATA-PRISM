@@ -40,6 +40,12 @@ class Dataset(Base):
     status = Column(String(30), default="ready")  # uploaded, ingested, profiled, failed
     quality_score = Column(Float, default=100.0)
     table_name = Column(String(100), nullable=False)  # SQL identifier in DuckDB
+    file_checksum = Column(String(64), nullable=True)
+    rows_read = Column(Integer, default=0)
+    rows_inserted = Column(Integer, default=0)
+    rows_rejected = Column(Integer, default=0)
+    processing_duration_ms = Column(Float, default=0.0)
+    source_id = Column(String(100), nullable=True)
     created_at = Column(DateTime, default=utc_now)
     updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
 
@@ -47,6 +53,30 @@ class Dataset(Base):
     columns = relationship("DatasetColumn", back_populates="dataset", cascade="all, delete-orphan")
     quality_issues = relationship("QualityIssue", back_populates="dataset", cascade="all, delete-orphan")
     insights = relationship("Insight", back_populates="dataset", cascade="all, delete-orphan")
+    ingestion_runs = relationship("IngestionRun", back_populates="dataset", cascade="all, delete-orphan")
+
+class IngestionRun(Base):
+    __tablename__ = "ingestion_runs"
+
+    id = Column(String(36), primary_key=True, default=generate_uuid)
+    dataset_id = Column(String(36), ForeignKey("datasets.id"), nullable=True)
+    source_id = Column(String(100), nullable=False)
+    source_name = Column(String(150), nullable=False)
+    original_filename = Column(String(255), nullable=False)
+    file_checksum = Column(String(64), nullable=True)
+    start_time = Column(DateTime, default=utc_now)
+    completion_time = Column(DateTime, nullable=True)
+    status = Column(String(30), default="completed")  # completed, failed, warning
+    rows_read = Column(Integer, default=0)
+    rows_inserted = Column(Integer, default=0)
+    rows_updated = Column(Integer, default=0)
+    rows_rejected = Column(Integer, default=0)
+    error_details = Column(Text, nullable=True)
+    detected_schema = Column(Text, nullable=True)
+    processing_duration_ms = Column(Float, default=0.0)
+    created_at = Column(DateTime, default=utc_now)
+
+    dataset = relationship("Dataset", back_populates="ingestion_runs")
 
 class DatasetColumn(Base):
     __tablename__ = "dataset_columns"

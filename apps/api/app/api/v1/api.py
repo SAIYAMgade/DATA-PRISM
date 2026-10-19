@@ -1,3 +1,4 @@
+import os
 import shutil
 import time
 import uuid
@@ -9,19 +10,22 @@ from sqlalchemy.orm import Session
 from apps.api.app.db.session import get_db
 from apps.api.app.core.config import settings, SERVER_START_TIME
 from apps.api.app.models.entities import (
-    Workspace, Dataset, SavedQuery, QueryHistory, Metric, Dashboard, Widget, Insight, Report
+    Workspace, Dataset, SavedQuery, QueryHistory, Metric, Dashboard, Widget, Insight, Report, IngestionRun
 )
 from apps.api.app.schemas.dto import (
-    WorkspaceResponse, DatasetResponse,
+    WorkspaceResponse, DatasetResponse, IngestionRunResponse,
     QueryExecuteRequest, QueryExecuteResponse,
     SavedQueryCreate, SavedQueryResponse, QueryHistoryResponse,
     MetricCreate, MetricResponse,
     DashboardCreate, DashboardResponse,
     InsightResponse, InsightReviewRequest,
-    ReportCreate, ReportResponse
+    ReportCreate, ReportResponse,
+    AIProfileSummaryRequest, AIProfileSummaryResponse,
+    NLToSqlRequest, NLToSqlResponse
 )
 from apps.api.app.services.ingest_service import ingest_service
 from apps.api.app.services.query_service import query_service
+from apps.api.app.services.ai_service import ai_service
 
 router = APIRouter()
 
@@ -57,6 +61,11 @@ def get_dataset(dataset_id: str, db: Session = Depends(get_db)):
     if not ds:
         raise HTTPException(status_code=404, detail="Dataset not found")
     return ds
+
+@router.get("/datasets/{dataset_id}/ingestion-runs", response_model=list[IngestionRunResponse])
+def get_dataset_ingestion_runs(dataset_id: str, db: Session = Depends(get_db)):
+    runs = db.query(IngestionRun).filter(IngestionRun.dataset_id == dataset_id).order_by(IngestionRun.created_at.desc()).all()
+    return runs
 
 @router.post("/datasets/upload", response_model=DatasetResponse)
 async def upload_dataset(
@@ -275,3 +284,38 @@ def get_model_lineage():
             {"source": "int_valid_transactions", "target": "mart_product_performance"}
         ]
     }
+
+# 10. AI Analytics Copilot & Natural-Language-to-SQL
+@router.get("/ai/capabilities")
+def get_ai_capabilities():
+    return {
+        "status": "ready",
+        "features": [
+            "ai_profile_summary",
+            "natural_language_to_sql",
+            "statistical_insights",
+            "safe_sandbox_execution"
+        ],
+        "sandbox_enforced": True,
+        "default_provider": "builtin-analyst",
+        "external_provider_configured": bool(os.getenv("OPENAI_API_KEY") or os.getenv("GEMINI_API_KEY"))
+    }
+
+@router.post("/ai/profile-summary", response_model=AIProfileSummaryResponse)
+def get_ai_profile_summary(req: AIProfileSummaryRequest, db: Session = Depends(get_db)):
+    ds = db.query(Dataset).filter(Dataset.id == req.dataset_id).first()
+    if not ds:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+    return ai_service.generate_profile_summary(ds, ds.columns, ds.quality_issues)
+
+@router.post("/ai/nl-to-sql", response_model=NLToSqlResponse)
+def natural_language_to_sql(req: NLToSqlRequest, db: Session = Depends(get_db)):
+    if req.dataset_id:
+        ds = db.query(Dataset).filter(Dataset.id == req.dataset_id).first()
+    else:
+        ds = db.query(Dataset).filter(Dataset.workspace_id == req.workspace_id).first()
+    if not ds:
+        raise HTTPException(status_code=404, detail="Dataset not found in specified workspace")
+    metrics = db.query(Metric).filter(Metric.workspace_id == req.workspace_id).all()
+    return ai_service.natural_language_to_sql(req.question, ds, metrics, execute=req.execute)
+

@@ -49,10 +49,36 @@ class DatasetResponse(BaseModel):
     status: str
     quality_score: float
     table_name: str
+    file_checksum: Optional[str] = None
+    rows_read: Optional[int] = 0
+    rows_inserted: Optional[int] = 0
+    rows_rejected: Optional[int] = 0
+    processing_duration_ms: Optional[float] = 0.0
+    source_id: Optional[str] = None
     created_at: datetime
     updated_at: datetime
     columns: list[ColumnProfileResponse] = []
     quality_issues: list[QualityIssueResponse] = []
+    model_config = ConfigDict(from_attributes=True)
+
+class IngestionRunResponse(BaseModel):
+    id: str
+    dataset_id: Optional[str] = None
+    source_id: str
+    source_name: str
+    original_filename: str
+    file_checksum: Optional[str] = None
+    start_time: datetime
+    completion_time: Optional[datetime] = None
+    status: str
+    rows_read: int
+    rows_inserted: int
+    rows_updated: int
+    rows_rejected: int
+    error_details: Optional[str] = None
+    detected_schema: Optional[str] = None
+    processing_duration_ms: float
+    created_at: datetime
     model_config = ConfigDict(from_attributes=True)
 
 # SQL Query
@@ -177,3 +203,39 @@ class ReportResponse(ReportCreate):
     created_at: datetime
     updated_at: datetime
     model_config = ConfigDict(from_attributes=True)
+
+# AI Analyst & NL-to-SQL
+class AIProfileSummaryRequest(BaseModel):
+    dataset_id: str
+
+class AIProfileSummaryResponse(BaseModel):
+    dataset_id: str
+    dataset_name: str
+    quality_score: float
+    health_grade: str
+    executive_summary: str
+    key_observations: list[str]
+    risk_factors: list[str]
+    recommended_transformations: list[str]
+    deterministic_metrics: dict[str, Any]
+    provider: str
+    ai_disclaimer: str
+
+class NLToSqlRequest(BaseModel):
+    workspace_id: str
+    dataset_id: Optional[str] = None
+    question: str
+    execute: bool = True
+
+class NLToSqlResponse(BaseModel):
+    question: str
+    dataset_id: str
+    table_name: str
+    generated_sql: str
+    validation_status: str
+    explanation: str
+    suggested_visualization: str
+    data_limitations: Optional[str] = None
+    query_result: Optional[QueryExecuteResponse] = None
+    provider: str
+

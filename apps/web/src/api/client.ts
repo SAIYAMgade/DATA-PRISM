@@ -43,6 +43,11 @@ export interface Dataset {
   status: string;
   quality_score: number;
   table_name: string;
+  file_checksum?: string;
+  rows_read?: number;
+  rows_inserted?: number;
+  rows_rejected?: number;
+  processing_duration_ms?: number;
   created_at: string;
   updated_at: string;
   columns: ColumnProfile[];
@@ -245,4 +250,72 @@ export const api = {
     const res = await fetch(`${API_BASE}/models/lineage`);
     return res.json();
   },
+  getIngestionRuns: async (datasetId: string): Promise<IngestionRun[]> => {
+    const res = await fetch(`${API_BASE}/datasets/${datasetId}/ingestion-runs`);
+    return res.json();
+  },
+  getAIProfileSummary: async (datasetId: string): Promise<AIProfileSummary> => {
+    const res = await fetch(`${API_BASE}/ai/profile-summary`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ dataset_id: datasetId }),
+    });
+    return res.json();
+  },
+  nlToSql: async (workspaceId: string, question: string, datasetId?: string): Promise<NLToSqlResult> => {
+    const res = await fetch(`${API_BASE}/ai/nl-to-sql`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ workspace_id: workspaceId, question, dataset_id: datasetId, execute: true }),
+    });
+    return res.json();
+  },
 };
+
+export interface IngestionRun {
+  id: string;
+  dataset_id?: string;
+  source_id: string;
+  source_name: string;
+  original_filename: string;
+  file_checksum?: string;
+  start_time: string;
+  completion_time?: string;
+  status: string;
+  rows_read: number;
+  rows_inserted: number;
+  rows_updated: number;
+  rows_rejected: number;
+  error_details?: string;
+  detected_schema?: string;
+  processing_duration_ms: number;
+  created_at: string;
+}
+
+export interface AIProfileSummary {
+  dataset_id: string;
+  dataset_name: string;
+  quality_score: number;
+  health_grade: string;
+  executive_summary: string;
+  key_observations: string[];
+  risk_factors: string[];
+  recommended_transformations: string[];
+  deterministic_metrics: Record<string, any>;
+  provider: string;
+  ai_disclaimer: string;
+}
+
+export interface NLToSqlResult {
+  question: string;
+  dataset_id: string;
+  table_name: string;
+  generated_sql: string;
+  validation_status: string;
+  explanation: string;
+  suggested_visualization: string;
+  data_limitations?: string;
+  query_result?: QueryResult;
+  provider: string;
+}
+

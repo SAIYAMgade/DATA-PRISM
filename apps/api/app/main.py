@@ -5,10 +5,11 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text
 from fastapi.staticfiles import StaticFiles
 from apps.api.app.core.config import settings, SERVER_START_TIME
 from apps.api.app.db.session import engine, SessionLocal, Base
-from apps.api.app.models.entities import Workspace, Dataset, Metric, SavedQuery, Dashboard, Widget, Report
+from apps.api.app.models.entities import Workspace, Dataset, Metric, SavedQuery, Dashboard, Widget, Report, IngestionRun
 from apps.api.app.api.v1.api import router as api_v1_router
 from apps.api.app.services.ingest_service import ingest_service
 from apps.api.app.services.query_service import query_service
@@ -17,6 +18,22 @@ from apps.api.app.services.query_service import query_service
 async def lifespan(app: FastAPI):
     # Startup: create tables
     Base.metadata.create_all(bind=engine)
+
+    # Safe column migrations for existing SQLite database
+    with engine.connect() as conn:
+        for col_name, col_type in [
+            ("file_checksum", "VARCHAR(64)"),
+            ("rows_read", "INTEGER DEFAULT 0"),
+            ("rows_inserted", "INTEGER DEFAULT 0"),
+            ("rows_rejected", "INTEGER DEFAULT 0"),
+            ("processing_duration_ms", "FLOAT DEFAULT 0.0"),
+            ("source_id", "VARCHAR(100)"),
+        ]:
+            try:
+                conn.execute(text(f"ALTER TABLE datasets ADD COLUMN {col_name} {col_type}"))
+                conn.commit()
+            except Exception:
+                pass
     
     db = SessionLocal()
     try:
